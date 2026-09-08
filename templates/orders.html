@@ -1,0 +1,637 @@
+{% extends "base.html" %}
+{% block content %}
+<script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+
+<div class="space-y-4 sm:space-y-6 pb-8 sm:pb-12 max-w-3xl mx-auto">
+    <div class="mb-4 sm:mb-6 border-b border-slate-200 pb-3 sm:pb-4">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-50 border border-cyan-200 text-cyan-600 text-xs font-mono mb-2 sm:mb-3">
+            <i data-lucide="clock" class="w-3.5 h-3.5"></i> MY TRIPS
+        </div>
+        <h3 class="text-2xl sm:text-3xl font-bold text-slate-800 tech-font mb-1 sm:mb-2">我的行程</h3>
+        <p class="text-slate-500 text-xs sm:text-sm" id="page-description">
+            查看您的乘车历史记录。每次行程完成或取消后都会自动记录。
+        </p>
+    </div>
+
+    <!-- 统计 -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+        <div class="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 text-center">
+            <div class="text-slate-400 text-[10px] font-bold uppercase mb-1" id="stats-count-label">累计行程</div>
+            <div class="text-xl sm:text-2xl font-black text-slate-800" id="stats-count">0 <span class="text-xs font-normal text-slate-500">次</span></div>
+        </div>
+        <div class="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 text-center">
+            <div class="text-slate-400 text-[10px] font-bold uppercase mb-1" id="stats-total-label">累计消费</div>
+            <div class="text-xl sm:text-2xl font-black text-amber-600" id="stats-total">¥0.00</div>
+        </div>
+        <div class="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 text-center col-span-2 sm:col-span-1">
+            <div class="text-slate-400 text-[10px] font-bold uppercase mb-1">常用目的地</div>
+            <div class="text-sm font-bold text-cyan-600 mt-1" id="stats-favorite">--</div>
+        </div>
+    </div>
+
+    <!-- 行程列表 -->
+    <div class="space-y-3 sm:space-y-4">
+        <div class="flex items-center justify-between">
+            <h4 class="font-bold text-slate-800 text-base sm:text-lg">历史行程记录</h4>
+            <button onclick="clearHistory()" class="text-[10px] sm:text-xs text-rose-500 hover:text-rose-600 font-bold transition">
+                清空记录
+            </button>
+        </div>
+        <div id="trips-list" class="space-y-3">
+            <div class="text-center text-slate-400 py-12 text-xs sm:text-sm bg-white rounded-xl border border-slate-200">
+                暂无行程记录
+            </div>
+        </div>
+    </div>
+
+    <!-- 付款弹窗（隐藏） -->
+    <div id="payment-modal" class="fixed inset-0 z-50 hidden" style="background: rgba(0,0,0,0.5);">
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-sm bg-white rounded-2xl shadow-2xl p-6">
+            <div class="text-center mb-4">
+                <div class="text-3xl mb-2">💳</div>
+                <h3 class="text-lg font-black text-slate-800">确认付款</h3>
+                <p class="text-xs text-slate-400 mt-1" id="modal-trip-info">--</p>
+            </div>
+            <div class="bg-amber-50 rounded-xl p-4 mb-4 text-center">
+                <div class="text-[10px] text-amber-500 font-bold uppercase mb-1">支付金额</div>
+                <div class="text-3xl font-black text-amber-600" id="modal-trip-price">¥0.00</div>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="closePaymentModal()" class="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-sm transition">取消</button>
+                <button onclick="submitPayment()" id="modal-pay-btn" class="flex-1 py-2.5 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white font-extrabold rounded-xl text-sm transition shadow-lg">确认支付</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentUserType = 'passenger';
+    let currentUserRole = 'normal';
+    let currentUserId = '';
+
+    document.addEventListener("DOMContentLoaded", function() {
+        // 读取用户身份
+        try {
+            const tokenStr = localStorage.getItem('mamba_auth_token') || sessionStorage.getItem('mamba_auth_token');
+            if (tokenStr) {
+                const user = JSON.parse(tokenStr);
+                currentUserType = user.user_type || 'passenger';
+                currentUserRole = user.role || 'normal';
+                currentUserId = user.username || '';
+            }
+        } catch(e) {}
+
+        // 更新页面描述和统计标签
+        if (currentUserRole === 'admin' || currentUserRole === 'super') {
+            document.getElementById('page-description').innerText = '查看系统中所有行程记录（管理员视图）。';
+            document.getElementById('stats-total-label').innerText = '累计金额';
+            document.getElementById('stats-count-label').innerText = '全部行程';
+        } else if (currentUserType === 'driver') {
+            document.getElementById('page-description').innerText = '查看您的接单历史记录。每次行程完成或取消后都会自动记录。';
+            document.getElementById('stats-total-label').innerText = '累计收入';
+        }
+
+        renderTrips();
+    });
+
+    // === 根据用户身份生成 localStorage key（用户隔离） ===
+    function tripsStorageKey() {
+        if (currentUserType === 'driver') {
+            var did = currentUserId;
+            if (did && did.indexOf('driver_') !== 0) did = 'driver_' + did;
+            return 'mamba_completed_trips_' + did;
+        } else {
+            return 'mamba_passenger_trips_' + currentUserId;
+        }
+    }
+
+    function driverStorageKey() {
+        var did = currentUserId;
+        if (did && did.indexOf('driver_') !== 0) did = 'driver_' + did;
+        return 'mamba_completed_trips_' + did;
+    }
+
+    function passengerStorageKey() {
+        return 'mamba_passenger_trips_' + currentUserId;
+    }
+
+    function deletedStorageKey() {
+        return 'mamba_deleted_trip_ids_' + currentUserId;
+    }
+
+    function getAllLocalTrips() {
+        var allTrips = [];
+        for (var ki = 0; ki < localStorage.length; ki++) {
+            var lkey = localStorage.key(ki);
+            if (lkey && (lkey.indexOf('mamba_passenger_trips_') === 0 || lkey.indexOf('mamba_completed_trips_') === 0)) {
+                try {
+                    var lt = JSON.parse(localStorage.getItem(lkey)) || [];
+                    allTrips = allTrips.concat(lt);
+                } catch(e) {}
+            }
+        }
+        return allTrips;
+    }
+
+    function renderTrips() {
+        // 先异步拉取服务端数据，再渲染
+        loadAndRenderTrips();
+    }
+
+    function fmtLocalTime(d) {
+        return d.getFullYear() + '-' +
+            (d.getMonth()+1).toString().padStart(2,'0') + '-' +
+            d.getDate().toString().padStart(2,'0') + ' ' +
+            d.getHours().toString().padStart(2,'0') + ':' +
+            d.getMinutes().toString().padStart(2,'0') + ':' +
+            d.getSeconds().toString().padStart(2,'0');
+    }
+
+    async function loadAndRenderTrips() {
+        let trips = [];
+        let serverTrips = [];
+
+        // ===== 管理员/高级会员：从服务端获取所有行程 =====
+        if (currentUserRole === 'admin' || currentUserRole === 'super') {
+            try {
+                const res = await fetch('/api/admin/all-trips');
+                const data = await res.json();
+                if (data.success && data.trips) {
+                    serverTrips = data.trips.map(function(t) {
+                        return {
+                            id: t.id,
+                            passenger_name: t.passenger_name || '乘客',
+                            driver_name: t.driver_name || '',
+                            pickup: t.pickup || {},
+                            dropoff: t.dropoff || {},
+                            price: t.price || 0,
+                            distance: t.distance || 0,
+                            timestamp: t.created_at ? fmtLocalTime(new Date(t.created_at * 1000)) : '',
+                            status: t.status || 'completed',
+                            paid: t.paid === true || t.paid === false ? t.paid : undefined,
+                            ride_type: t.ride_type || '',
+                            dispatch_order_id: t.dispatch_order_id || '',
+                            dispatch_info: t.dispatch_info || null
+                        };
+                    });
+                }
+            } catch(e) { console.error('获取管理员全部行程失败:', e); }
+
+            // 合并本地存储数据（扫描所有用户特定key）
+            let localTrips = getAllLocalTrips();
+
+            // 去重合并
+            const seen = {};
+            serverTrips.forEach(function(t) { seen[t.id] = true; trips.push(t); });
+            localTrips.forEach(function(t) {
+                if (!seen[t.id]) { seen[t.id] = true; trips.push(t); }
+            });
+        } else if (currentUserType === 'driver') {
+            try {
+                const tokenStr = localStorage.getItem('mamba_auth_token') || sessionStorage.getItem('mamba_auth_token');
+                if (tokenStr) {
+                    const user = JSON.parse(tokenStr);
+                    let driverId = user.username || '';
+                    if (driverId && driverId.indexOf('driver_') !== 0) {
+                        driverId = 'driver_' + driverId;
+                    }
+                    if (driverId) {
+                        const res = await fetch('/api/driver/trips?driver_id=' + encodeURIComponent(driverId));
+                        const data = await res.json();
+                        if (data.success && data.trips) {
+                            serverTrips = data.trips.map(function(t) {
+                                return {
+                                    id: t.id,
+                                    passenger_name: t.passenger_name || '乘客',
+                                    driver_name: t.driver_name || '',
+                                    pickup: t.pickup || {},
+                                    dropoff: t.dropoff || {},
+                                    price: t.price || 0,
+                                    distance: t.distance || 0,
+                                    timestamp: t.created_at ? fmtLocalTime(new Date(t.created_at * 1000)) : '',
+                                    status: t.status || 'completed',
+                                    paid: t.paid === true || t.paid === false ? t.paid : undefined
+                                };
+                            });
+                        }
+                    }
+                }
+            } catch(e) { console.error('获取服务端行程失败:', e); }
+        }
+
+        if (currentUserType === 'driver') {
+            // 司机：合并 localStorage + 服务端数据（服务端 paid 状态优先）
+            let localTrips = [];
+            try {
+                localTrips = JSON.parse(localStorage.getItem(tripsStorageKey())) || [];
+            } catch(e) {}
+            // 去重
+            const seen = {};
+            // 先加入服务端数据（有权威 paid 状态）
+            serverTrips.forEach(function(t) {
+                seen[t.id] = true;
+                trips.push(t);
+            });
+            // 再加入本地数据（如果服务端没有）
+            localTrips.forEach(function(t) {
+                if (!seen[t.id]) {
+                    seen[t.id] = true;
+                    trips.push(t);
+                }
+            });
+            // 用服务端 paid 状态覆盖本地
+            var serverPaidMap = {};
+            serverTrips.forEach(function(t) {
+                if (t.paid !== undefined) serverPaidMap[t.id] = t.paid;
+            });
+            trips.forEach(function(t) {
+                if (serverPaidMap[t.id] !== undefined) t.paid = serverPaidMap[t.id];
+            });
+        } else {
+            // 乘客：从服务端获取行程，合并本地存储
+            try {
+                const tokenStr2 = localStorage.getItem('mamba_auth_token') || sessionStorage.getItem('mamba_auth_token');
+                if (tokenStr2) {
+                    const user2 = JSON.parse(tokenStr2);
+                    const paxId = user2.username || '';
+                    if (paxId) {
+                        const res2 = await fetch('/api/passenger/trips?passenger_id=' + encodeURIComponent(paxId));
+                        const data2 = await res2.json();
+                        if (data2.success && data2.trips) {
+                            serverTrips = data2.trips.map(function(t) {
+                                return {
+                                    id: t.id,
+                                    passenger_name: t.passenger_name || '乘客',
+                                    driver_name: t.driver_name || '',
+                                    pickup: t.pickup || {},
+                                    dropoff: t.dropoff || {},
+                                    price: t.price || 0,
+                                    distance: t.distance || 0,
+                                    timestamp: t.created_at ? fmtLocalTime(new Date(t.created_at * 1000)) : '',
+                                    status: t.status || 'completed',
+                                    paid: t.paid === true || t.paid === false ? t.paid : undefined,
+                                    ride_type: t.ride_type || ''
+                                };
+                            });
+                        }
+                    }
+                }
+            } catch(e) { console.error('获取乘客行程失败:', e); }
+
+            // 合并本地存储和服务端
+            var localPaxTrips = [];
+            try {
+                localPaxTrips = JSON.parse(localStorage.getItem(tripsStorageKey())) || [];
+            } catch(e) {}
+            const seenPax = {};
+            serverTrips.forEach(function(t) { seenPax[t.id] = true; trips.push(t); });
+            localPaxTrips.forEach(function(t) {
+                if (!seenPax[t.id]) { seenPax[t.id] = true; trips.push(t); }
+            });
+            // 用服务端 paid 状态覆盖本地
+            var serverPaidMap2 = {};
+            serverTrips.forEach(function(t) {
+                if (t.paid !== undefined) serverPaidMap2[t.id] = t.paid;
+            });
+            trips.forEach(function(t) {
+                if (serverPaidMap2[t.id] !== undefined) t.paid = serverPaidMap2[t.id];
+            });
+        }
+
+        // 按时间戳倒序排列
+        trips.sort(function(a, b) {
+            return (b.timestamp || '').localeCompare(a.timestamp || '');
+        });
+
+        // 构建服务端已有行程 ID 集合（用于判断 paid 状态是否可信）
+        var serverTripIds = new Set();
+        serverTrips.forEach(function(t) { serverTripIds.add(t.id); });
+
+        // 所有用户：过滤掉已删除（隐藏）的行程
+        var deletedSet = {};
+        var delIds = getDeletedTripIds();
+        for (var di = 0; di < delIds.length; di++) { deletedSet[delIds[di]] = true; }
+        trips = trips.filter(function(t) { return !deletedSet[t.id]; });
+
+        // 管理员/高级用户：只看已完成的订单
+        if (currentUserRole === 'admin' || currentUserRole === 'super') {
+            trips = trips.filter(function(t) { return t.status === 'completed'; });
+        }
+
+        // 统计
+        document.getElementById('stats-count').innerHTML = trips.length + ' <span class="text-xs font-normal text-slate-500">次</span>';
+        // 统计：仅已完成的行程计入收入/消费
+        const total = trips.reduce(function(s, t) { return s + (t.status === 'completed' ? parseFloat(t.price || 0) : 0); }, 0);
+        document.getElementById('stats-total').innerText = '¥' + total.toFixed(2);
+
+        // 最常用目的地
+        const destCount = {};
+        trips.forEach(function(t) {
+            const name = t.dropoff && t.dropoff.name ? t.dropoff.name : '未知';
+            destCount[name] = (destCount[name] || 0) + 1;
+        });
+        let favorite = '--';
+        let maxCount = 0;
+        for (const [name, count] of Object.entries(destCount)) {
+            if (count > maxCount) { maxCount = count; favorite = name; }
+        }
+        document.getElementById('stats-favorite').innerText = favorite;
+
+        // 渲染列表
+        const container = document.getElementById('trips-list');
+        if (trips.length === 0) {
+            container.innerHTML = '<div class="text-center text-slate-400 py-12 text-xs sm:text-sm bg-white rounded-xl border border-slate-200">暂无行程记录<br><span class="text-[10px]">打车完成后将自动记录在此</span></div>';
+            return;
+        }
+
+        container.innerHTML = '';
+        trips.forEach(function(trip) {
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-xl shadow-sm border border-slate-200 p-3 sm:p-4 hover:shadow-md transition';
+
+            // 根据用户角色显示不同的主要标识
+            let mainLabel = '';
+            let isDispatch = trip.ride_type === 'dispatch_broadcast' || (trip.price === 0 && trip.passenger_name && trip.passenger_name.indexOf('调度任务') >= 0);
+            let dispatchLabel = isDispatch ? ' 📋调度' : '';
+
+            if (currentUserRole === 'admin' || currentUserRole === 'super') {
+                // 管理员视角：显示乘客 + 司机 + 上车点
+                if (isDispatch) {
+                    mainLabel = '📋 调度: ' + (trip.driver_name || '司机') + ' → ' + (trip.dropoff && trip.dropoff.name ? trip.dropoff.name : '目的地');
+                    if (trip.dispatch_info) {
+                        mainLabel += ' (Grid ' + trip.dispatch_info.grid_id + ' ' + trip.dispatch_info.grid_name + ')';
+                    }
+                } else {
+                    mainLabel = (trip.passenger_name || '乘客') + ' → ' + (trip.driver_name || '司机') + ' · ' + (trip.pickup && trip.pickup.name ? trip.pickup.name : '上车点');
+                }
+            } else if (currentUserType === 'driver') {
+                // 司机视角：显示乘客名
+                if (isDispatch) {
+                    mainLabel = '📋 调度任务 · ' + (trip.dropoff && trip.dropoff.name ? trip.dropoff.name : '目的地');
+                } else {
+                    mainLabel = (trip.passenger_name || '乘客') + ' · ' + (trip.pickup && trip.pickup.name ? trip.pickup.name : '上车点');
+                }
+            } else {
+                // 乘客视角：显示司机名
+                mainLabel = (trip.driver_name || '司机') + ' · ' + (trip.pickup && trip.pickup.name ? trip.pickup.name : '上车点');
+            }
+
+            // 状态标签
+            const status = trip.status || 'completed';
+            // 检查服务端是否有此行程记录（服务端无记录 = 服务器可能重启过，paid 状态不可信）
+            var serverHasRecord = serverTripIds.has(trip.id);
+            let statusBadge = '';
+            if (status === 'completed') {
+                if (isDispatch) {
+                    statusBadge = '<div class="text-[9px] text-indigo-500 font-bold bg-indigo-50 px-1.5 py-0.5 rounded mt-1">调度完成</div>';
+                } else if (trip.paid === false && serverHasRecord) {
+                    // 仅当服务端确实标记为未付款时才显示"待付款"（可点击付款）
+                    statusBadge = '<div class="text-[9px] text-amber-600 font-bold bg-amber-50 px-1.5 py-0.5 rounded mt-1 flex items-center gap-1 cursor-pointer hover:bg-amber-100 transition" onclick="event.stopPropagation(); openPaymentModal(\'' + trip.id + '\', \'' + (trip.pickup && trip.pickup.name ? trip.pickup.name.replace(/'/g, "\\'") : '--') + '\', \'' + (trip.dropoff && trip.dropoff.name ? trip.dropoff.name.replace(/'/g, "\\'") : '--') + '\', ' + parseFloat(trip.price || 0).toFixed(2) + ')"><span class="w-1 h-1 rounded-full bg-amber-500 animate-pulse"></span>待付款</div>';
+                } else if (trip.paid === false && !serverHasRecord) {
+                    // 服务器可能重启过，无法确认付款状态 → 显示"已完成"（避免误导）
+                    statusBadge = '<div class="text-[9px] text-emerald-500 font-bold bg-emerald-50 px-1.5 py-0.5 rounded mt-1">已完成</div>';
+                } else {
+                    statusBadge = '<div class="text-[9px] text-emerald-500 font-bold bg-emerald-50 px-1.5 py-0.5 rounded mt-1">已完成</div>';
+                }
+            } else if (status === 'cancelled') {
+                statusBadge = '<div class="text-[9px] text-rose-500 font-bold bg-rose-50 px-1.5 py-0.5 rounded mt-1">已取消</div>';
+            } else if (status === 'driving') {
+                statusBadge = '<div class="text-[9px] text-indigo-500 font-bold bg-indigo-50 px-1.5 py-0.5 rounded mt-1">行程中</div>';
+            } else {
+                statusBadge = '<div class="text-[9px] text-slate-500 font-bold bg-slate-50 px-1.5 py-0.5 rounded mt-1">' + status + '</div>';
+            }
+
+            // 金额显示
+            var priceDisplay = isDispatch ? '<span class="text-xs text-indigo-500">调度任务</span>' : '¥' + parseFloat(trip.price || 0).toFixed(2);
+            var priceClass = isDispatch ? 'text-xs text-indigo-600 font-bold' : 'font-black text-base sm:text-lg text-slate-800';
+
+            card.innerHTML = `
+                <div class="flex justify-between items-start mb-2">
+                    <div>
+                        <div class="font-bold text-slate-800 text-sm">${mainLabel}</div>
+                        <div class="text-[10px] text-slate-400 font-mono mt-0.5">${trip.timestamp || '--'}</div>
+                    </div>
+                    <div class="text-right">
+                        <div class="${priceClass}">${priceDisplay}</div>
+                        ${statusBadge}
+                    </div>
+                </div>
+                <div class="text-[10px] sm:text-xs text-slate-500 space-y-1 bg-slate-50 rounded-lg p-2">
+                    <div>🟢 上车: ${trip.pickup && trip.pickup.name ? trip.pickup.name : '--'}</div>
+                    <div>🔴 下车: ${trip.dropoff && trip.dropoff.name ? trip.dropoff.name : '--'}</div>
+                    ${trip.distance ? '<div class="text-slate-400">📏 行程: ' + trip.distance + ' km</div>' : ''}
+                    ${currentUserRole === 'admin' || currentUserRole === 'super' ? '<div class="text-slate-400">👤 乘客: ' + (trip.passenger_name || '--') + '  |  🚕 司机: ' + (trip.driver_name || '--') + '</div>' : ''}
+                    ${isDispatch && (currentUserRole === 'admin' || currentUserRole === 'super') ? '<div class="text-indigo-400">📋 调度任务 · 金额为0 · 无需付款</div>' : ''}
+                </div>
+            `;
+            container.appendChild(card);
+        });
+
+        // 如果列表中有待付款订单，启动服务端轮询
+        startPaymentRefreshPolling();
+    }
+
+    function clearHistory() {
+        if (!confirm('确定要隐藏您的所有行程记录吗？记录仍保留在系统中，只是不再显示。')) return;
+
+        var deletedIds = [];
+
+        if (currentUserType === 'driver') {
+            // 收集该司机所有记录的 ID（不删除 localStorage 数据）
+            try {
+                var trips = JSON.parse(localStorage.getItem(tripsStorageKey())) || [];
+                for (var i = 0; i < trips.length; i++) {
+                    deletedIds.push(trips[i].id);
+                }
+            } catch(e) {}
+        } else if (currentUserRole === 'admin' || currentUserRole === 'super') {
+            // 管理员/超级用户：收集自己作为司机或乘客的本地记录 ID
+            try {
+                var dTrips = JSON.parse(localStorage.getItem(driverStorageKey())) || [];
+                for (var j = 0; j < dTrips.length; j++) {
+                    deletedIds.push(dTrips[j].id);
+                }
+            } catch(e) {}
+            try {
+                var pTrips = JSON.parse(localStorage.getItem(passengerStorageKey())) || [];
+                for (var k = 0; k < pTrips.length; k++) {
+                    deletedIds.push(pTrips[k].id);
+                }
+            } catch(e) {}
+        } else {
+            // 乘客：收集该乘客所有记录的 ID
+            try {
+                var pTrips2 = JSON.parse(localStorage.getItem(tripsStorageKey())) || [];
+                for (var m = 0; m < pTrips2.length; m++) {
+                    deletedIds.push(pTrips2[m].id);
+                }
+            } catch(e) {}
+        }
+
+        // 标记已删除的 ID，用于过滤（数据仍在 localStorage 中）
+        markTripsDeleted(deletedIds);
+
+        renderTrips();
+    }
+
+    // 获取已删除的行程 ID 列表
+    function getDeletedTripIds() {
+        try { return JSON.parse(localStorage.getItem(deletedStorageKey())) || []; } catch(e) { return []; }
+    }
+
+    // 将行程 ID 标记为已删除
+    function markTripsDeleted(ids) {
+        if (!ids || ids.length === 0) return;
+        var existing = getDeletedTripIds();
+        var combined = existing.concat(ids);
+        var seen = {};
+        var unique = [];
+        for (var i = 0; i < combined.length; i++) {
+            if (!seen[combined[i]]) { seen[combined[i]] = true; unique.push(combined[i]); }
+        }
+        localStorage.setItem(deletedStorageKey(), JSON.stringify(unique));
+    }
+
+    // 跨标签页同步：乘客付款后本页面即时刷新
+    window.addEventListener('storage', function(e) {
+        if (e.key === 'mamba_trip_sync' && e.newValue) {
+            try {
+                var msg = JSON.parse(e.newValue);
+                if (msg.action === 'payment_confirmed' || msg.action === 'earnings_confirmed' || msg.action === 'trip_cancelled') {
+                    renderTrips();
+                }
+            } catch(er) {}
+        }
+        // 追踪用户特定存储的变更
+        if (e.key === tripsStorageKey()) {
+            renderTrips();
+        }
+    });
+
+    // 定时轮询服务端：检测待付款订单是否已被乘客支付（无需刷新页面）
+    var paymentRefreshTimer = null;
+    function startPaymentRefreshPolling() {
+        if (paymentRefreshTimer) return;
+        paymentRefreshTimer = setInterval(function() {
+            // 检查当前页面是否有待付款订单
+            var hasUnpaid = false;
+            var unpaidTripIds = [];
+            // 扫描当前 DOM 中的行程卡片，找出"待付款"状态
+            var tripCards = document.querySelectorAll('#trips-list > div');
+            tripCards.forEach(function(card) {
+                var badge = card.querySelector('.text-amber-600');
+                if (badge && badge.textContent.indexOf('待付款') >= 0) {
+                    hasUnpaid = true;
+                    // 从卡片数据获取 tripId
+                    var onclick = badge.getAttribute('onclick') || '';
+                    var match = onclick.match(/openPaymentModal\('([^']+)'/);
+                    if (match) unpaidTripIds.push(match[1]);
+                }
+            });
+            if (!hasUnpaid) {
+                clearInterval(paymentRefreshTimer);
+                paymentRefreshTimer = null;
+                return;
+            }
+            // 轮询每个待付款行程的服务端状态
+            unpaidTripIds.forEach(function(tripId) {
+                fetch('/api/trips/' + tripId)
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.success && data.trip && data.trip.paid) {
+                            // 服务端确认已付款，更新本地和刷新列表
+                            updateAllLocalPaidStatus(tripId);
+                            renderTrips();
+                        }
+                    }).catch(function() {});
+            });
+        }, 3000);
+    }
+
+    function updateAllLocalPaidStatus(tripId) {
+        // 更新所有 localStorage 中该行程的 paid 状态
+        for (var ki = 0; ki < localStorage.length; ki++) {
+            var lkey = localStorage.key(ki);
+            if (lkey && (lkey.indexOf('mamba_passenger_trips_') === 0 || lkey.indexOf('mamba_completed_trips_') === 0)) {
+                try {
+                    var trips = JSON.parse(localStorage.getItem(lkey)) || [];
+                    var updated = false;
+                    for (var i = 0; i < trips.length; i++) {
+                        if (trips[i].id === tripId) { trips[i].paid = true; updated = true; }
+                    }
+                    if (updated) localStorage.setItem(lkey, JSON.stringify(trips));
+                } catch(e) {}
+            }
+        }
+        // 通知其他标签页
+        localStorage.setItem('mamba_trip_sync', JSON.stringify({
+            action: 'payment_confirmed',
+            tripId: tripId,
+            timestamp: Date.now()
+        }));
+    }
+
+    // ===== 付款弹窗 =====
+    var pendingPaymentTripId = null;
+
+    function openPaymentModal(tripId, pickupName, dropoffName, price) {
+        pendingPaymentTripId = tripId;
+        document.getElementById('modal-trip-info').innerText = pickupName + ' → ' + dropoffName;
+        document.getElementById('modal-trip-price').innerText = '¥' + price.toFixed(2);
+        document.getElementById('payment-modal').classList.remove('hidden');
+    }
+
+    function closePaymentModal() {
+        pendingPaymentTripId = null;
+        document.getElementById('payment-modal').classList.add('hidden');
+        var btn = document.getElementById('modal-pay-btn');
+        btn.disabled = false;
+        btn.innerText = '确认支付';
+    }
+
+    function submitPayment() {
+        if (!pendingPaymentTripId) return;
+        var btn = document.getElementById('modal-pay-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></span>支付中...';
+
+        fetch('/api/trips/' + pendingPaymentTripId + '/pay', { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    // 更新 localStorage 中该行程的 paid 状态
+                    try {
+                        var trips = JSON.parse(localStorage.getItem(tripsStorageKey())) || [];
+                        for (var i = 0; i < trips.length; i++) {
+                            if (trips[i].id === pendingPaymentTripId) {
+                                trips[i].paid = true;
+                            }
+                        }
+                        localStorage.setItem(tripsStorageKey(), JSON.stringify(trips));
+                    } catch(e) {}
+
+                    // 跨标签页通知：行程已付款
+                    localStorage.setItem('mamba_trip_sync', JSON.stringify({
+                        action: 'payment_confirmed',
+                        tripId: pendingPaymentTripId,
+                        timestamp: Date.now()
+                    }));
+
+                    btn.innerHTML = '✅ 支付成功';
+                    setTimeout(function() {
+                        closePaymentModal();
+                        renderTrips();
+                    }, 800);
+                } else {
+                    alert('支付失败：' + (data.message || '未知错误'));
+                    btn.disabled = false;
+                    btn.innerText = '确认支付';
+                }
+            }).catch(function() {
+                alert('网络错误，支付失败');
+                btn.disabled = false;
+                btn.innerText = '确认支付';
+            });
+    }
+</script>
+{% endblock %}
