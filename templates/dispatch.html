@@ -272,7 +272,7 @@
                 btn.className = 'flex items-center gap-1.5 bg-emerald-600 text-white px-3 py-1.5 rounded-lg transition shadow-sm';
                 btn.disabled = false;
                 if (window.lucide) lucide.createIcons();
-                if (pos.accuracy > 3000) alert('当前设备仅返回低精度网络位置，请开启系统“精确位置”权限，或点击地图手动校正。');
+                if (!pos.corrected && pos.accuracy > 3000) alert('当前设备仅返回低精度网络位置，请开启系统“精确位置”权限，或点击地图手动校正。');
             })
             .catch(function(err) {
                 alert('定位失败，请检查GPS权限');

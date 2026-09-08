@@ -4,6 +4,10 @@
     const PI = Math.PI;
     const A = 6378245.0;
     const EE = 0.006693421622965943;
+    const OUC_CAMPUSES = {
+        westCoast: {lng: 120.030367, lat: 35.775004, name: '中国海洋大学西海岸校区（黄岛）'},
+        laoshan: {lng: 120.493205, lat: 36.158191, name: '中国海洋大学崂山校区'}
+    };
 
     function outsideChina(lng, lat) {
         return lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271;
@@ -43,6 +47,41 @@
         return {lng: lng + dLng, lat: lat + dLat};
     }
 
+    function distanceKm(first, second) {
+        const rad = PI / 180;
+        const dLat = (second.lat - first.lat) * rad;
+        const dLng = (second.lng - first.lng) * rad;
+        const value = Math.sin(dLat / 2) ** 2 + Math.cos(first.lat * rad) *
+            Math.cos(second.lat * rad) * Math.sin(dLng / 2) ** 2;
+        return 6371 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+    }
+
+    function correctCampusNetworkLocation(position) {
+        if (distanceKm(position, OUC_CAMPUSES.westCoast) < 4) {
+            return Object.assign({}, position, {locationName: OUC_CAMPUSES.westCoast.name});
+        }
+        if (distanceKm(position, OUC_CAMPUSES.laoshan) >= 5) return position;
+
+        let campusChoice = null;
+        try { campusChoice = sessionStorage.getItem('ouc_actual_campus'); } catch (error) {}
+        if (!campusChoice && typeof global.confirm === 'function') {
+            campusChoice = global.confirm(
+                '校园网络定位返回了崂山校区。\n\n如果你实际位于西海岸校区（黄岛），请选择“确定”进行纠偏；实际位于崂山校区请选择“取消”。'
+            ) ? 'westCoast' : 'laoshan';
+            try { sessionStorage.setItem('ouc_actual_campus', campusChoice); } catch (error) {}
+        }
+
+        if (campusChoice === 'westCoast') {
+            return Object.assign({}, position, {
+                lng: OUC_CAMPUSES.westCoast.lng,
+                lat: OUC_CAMPUSES.westCoast.lat,
+                locationName: OUC_CAMPUSES.westCoast.name,
+                corrected: true
+            });
+        }
+        return Object.assign({}, position, {locationName: OUC_CAMPUSES.laoshan.name});
+    }
+
     function getAccuratePosition(options) {
         options = options || {};
         const targetAccuracy = options.targetAccuracy || 50;
@@ -69,13 +108,13 @@
                 settled = true;
                 cleanup();
                 const mapCoordinate = toAmapCoordinate(position.coords.longitude, position.coords.latitude);
-                resolve({
+                resolve(correctCampusNetworkLocation({
                     lng: mapCoordinate.lng,
                     lat: mapCoordinate.lat,
                     accuracy: Number(position.coords.accuracy) || 0,
                     rawLng: position.coords.longitude,
                     rawLat: position.coords.latitude
-                });
+                }));
             }
 
             function fail(error) {

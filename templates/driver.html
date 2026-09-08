@@ -596,8 +596,9 @@
                 updateDriverOnMap();
                 updateStatusPanel();
                 map.setView([driverPos.lat, driverPos.lng], 15);
-                document.getElementById('gps-indicator').innerHTML =
-                    '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> GPS 已定位 (±' + Math.round(pos.accuracy || 10) + 'm)';
+                document.getElementById('gps-indicator').innerHTML = pos.corrected
+                    ? '<span class="w-1.5 h-1.5 rounded-full bg-cyan-500"></span> 校园网络定位已纠偏至西海岸校区'
+                    : '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> GPS 已定位 (±' + Math.round(pos.accuracy || 10) + 'm)';
                 document.getElementById('gps-display').innerText = driverPos.lng.toFixed(5) + ', ' + driverPos.lat.toFixed(5);
                 saveDriverPosition();
 
@@ -605,7 +606,7 @@
                 btn.className = 'px-4 py-2.5 bg-emerald-600 text-white font-bold rounded-xl text-sm transition shadow-sm flex items-center gap-1.5';
                 btn.disabled = false;
                 if (window.lucide) lucide.createIcons();
-                if (pos.accuracy > 3000) alert('当前设备仅返回低精度网络位置，请开启系统“精确位置”权限，或点击地图手动校正。');
+                if (!pos.corrected && pos.accuracy > 3000) alert('当前设备仅返回低精度网络位置，请开启系统“精确位置”权限，或点击地图手动校正。');
             })
             .catch(function(err) {
                 document.getElementById('gps-indicator').innerHTML =

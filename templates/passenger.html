@@ -737,8 +737,10 @@
                 gpsLocated = true;
                 savePassengerPosition();
                 updateUserOnMap();
-                document.getElementById('gps-indicator').innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> GPS 已定位 (±' + Math.round(pos.accuracy || 10) + 'm)';
-                applyPickupFromCurrentPosition();
+                document.getElementById('gps-indicator').innerHTML = pos.corrected
+                    ? '<span class="w-1.5 h-1.5 rounded-full bg-cyan-500"></span> 校园网络定位已纠偏至西海岸校区'
+                    : '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> GPS 已定位 (±' + Math.round(pos.accuracy || 10) + 'm)';
+                applyPickupFromCurrentPosition(pos.locationName);
                 updateEstimate();
 
                 if (btn) {
@@ -748,7 +750,7 @@
                     btn.classList.add('bg-emerald-500', 'hover:bg-emerald-600');
                     if (window.lucide) lucide.createIcons();
                 }
-                if (pos.accuracy > 3000) alert('当前设备仅返回低精度网络位置，请开启系统“精确位置”权限，或点击地图手动校正。');
+                if (!pos.corrected && pos.accuracy > 3000) alert('当前设备仅返回低精度网络位置，请开启系统“精确位置”权限，或点击地图手动校正。');
             })
             .catch(function(err) {
                 document.getElementById('gps-indicator').innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> 定位失败 · 使用默认位置';
@@ -766,10 +768,10 @@
     }
 
     // 将当前 passengerPosition 应用到上车点输入框和地图
-    function applyPickupFromCurrentPosition() {
+    function applyPickupFromCurrentPosition(locationName) {
         var input = document.getElementById('pickup-input');
         var hidden = document.getElementById('pickup-hidden');
-        var locName = getCurrentLocationName(passengerPosition.lng, passengerPosition.lat);
+        var locName = locationName || getCurrentLocationName(passengerPosition.lng, passengerPosition.lat);
         if (input) { input.value = locName; input.dataset.lastValid = locName; }
         if (hidden) hidden.value = 'current';
         selectedPickup = { name: locName, lng: passengerPosition.lng, lat: passengerPosition.lat };
