@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: jinan-urban
+    runtime: python
+    buildCommand: python -m pip install -r requirements.txt && python generate_frontend_data.py
+    startCommand: gunicorn app:app
+    healthCheckPath: /api/health

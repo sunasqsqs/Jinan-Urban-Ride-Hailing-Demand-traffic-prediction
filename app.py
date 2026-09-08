@@ -17,6 +17,30 @@ app = Flask(__name__)
 app.secret_key = "mamba_gnn_super_secret_key"
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# 前端统一使用稳定的数据集 ID；原始实验目录只作为图片等训练产物来源。
+FRONTEND_DATASETS = {
+    "short": {
+        "data_file": os.path.join(CURRENT_DIR, "static", "data", "short_cycle.json"),
+        "artifact_dir": os.path.join(CURRENT_DIR, "new results"),
+    },
+    "long": {
+        "data_file": os.path.join(CURRENT_DIR, "static", "data", "long_cycle.json"),
+        "artifact_dir": os.path.join(CURRENT_DIR, "new results2"),
+    },
+}
+DATASET_ALIASES = {
+    "short": "short",
+    "long": "long",
+    "results": "short",
+    "results2": "long",
+    "new results": "short",
+    "new results2": "long",
+}
+
+
+def normalize_dataset(dataset):
+    return DATASET_ALIASES.get(dataset or "", "short")
+
 # ================= 1. 线程安全打车模拟与调度指令内存数据库 =================
 taxi_state_lock = Lock()
 TAXI_DRIVERS = {}       # 存放所有在线司机 {driver_id: {name, location, status, vehicle, rating, user_type}}
@@ -143,17 +167,25 @@ def seed_initial_trips():
 
 # ================= 2. 预测大盘数据集读取 =================
 def get_current_dataset():
-    return session.get('dataset', 'results')
+    return normalize_dataset(session.get('dataset', 'short'))
 
 def get_experiment_data(dataset_override=None):
-    dataset_dir = dataset_override if dataset_override else get_current_dataset()
-    json_path = os.path.join(CURRENT_DIR, dataset_dir, 'experiment_report.json')
+    dataset_id = normalize_dataset(dataset_override or get_current_dataset())
+    json_path = FRONTEND_DATASETS[dataset_id]["data_file"]
     if os.path.exists(json_path):
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
             print(f"JSON 解析错误: {e}")
+
+    # Render 只会取得 Git 中的文件。若构建产物缺失，则从仓库内的原始
+    # experiment_report.json 即时派生，确保看板和需求预测接口仍可用。
+    try:
+        from generate_frontend_data import DATASETS, build_dataset
+        return build_dataset(dataset_id, DATASETS[dataset_id])
+    except Exception as e:
+        print(f"前端数据生成错误: {e}")
     return {}
 
 # ================= 3. 系统核心路由 =================
@@ -214,40 +246,50 @@ def doc(): return render_template('doc.html', page='doc')
 def users(): return render_template('users.html', page='users')
 
 # 动态静态分发
+@app.route('/api/artifacts/<dataset_id>/<path:filename>')
+def serve_dataset_artifact(dataset_id, filename):
+    dataset_id = normalize_dataset(dataset_id)
+    return send_from_directory(FRONTEND_DATASETS[dataset_id]["artifact_dir"], filename)
+
+
+# 兼容旧页面或收藏链接；新页面使用 /api/artifacts/<short|long>/...。
 @app.route('/results/<path:filename>')
 @app.route('/results2/<path:filename>')
 def serve_results_file(filename):
-    # URL-decode the path segment to handle spaces encoded as %20
-    dataset_dir = urllib.parse.unquote(request.path.split('/')[1])
-    if dataset_dir == 'real-time':
-        dataset_dir = 'real-time results'
-    referer = request.headers.get("Referer", "")
-    if "/analytics" in referer or "/contrast" in referer:
-        dataset_dir = "results2"
-    results_dir = os.path.join(CURRENT_DIR, dataset_dir)
-    return send_from_directory(results_dir, filename)
+    legacy_id = urllib.parse.unquote(request.path.split('/')[1])
+    dataset_id = normalize_dataset(legacy_id)
+    return send_from_directory(FRONTEND_DATASETS[dataset_id]["artifact_dir"], filename)
 
 # ================= 4. Mamba-GNN 预测数据接口 =================
 @app.route('/api/data')
 def api_data():
-    referer = request.headers.get("Referer", "")
     dataset_param = request.args.get("dataset")
-
-    if "/analytics" in referer or "/contrast" in referer:
-        data = get_experiment_data(dataset_override="results2")
-    elif dataset_param in ["results", "results2", "real-time results"]:
-        data = get_experiment_data(dataset_override=dataset_param)
-    else:
-        data = get_experiment_data()
+    data = get_experiment_data(dataset_override=dataset_param)
 
     return jsonify(data) if data else (jsonify({"error": "暂无数据"}), 404)
+
+
+@app.route('/api/health')
+def api_health():
+    dataset_status = {}
+    healthy = True
+    for dataset_id in FRONTEND_DATASETS:
+        data = get_experiment_data(dataset_override=dataset_id)
+        dataset_status[dataset_id] = {
+            "available": bool(data),
+            "time_steps": len(data.get("predictions_time_series", {}).get("ground_truth", [])),
+            "generated_file": os.path.exists(FRONTEND_DATASETS[dataset_id]["data_file"]),
+        }
+        healthy = healthy and dataset_status[dataset_id]["available"]
+    return jsonify({"status": "ok" if healthy else "error", "datasets": dataset_status}), 200 if healthy else 503
 
 @app.route('/api/set_dataset', methods=['POST'])
 def set_dataset():
     data = request.get_json()
-    if data and 'dataset' in data and data['dataset'] in ['results', 'results2']:
-        session['dataset'] = data['dataset']
-        return jsonify({"status": "success", "dataset": data['dataset']})
+    if data and data.get('dataset') in DATASET_ALIASES:
+        dataset_id = normalize_dataset(data['dataset'])
+        session['dataset'] = dataset_id
+        return jsonify({"status": "success", "dataset": dataset_id})
     return jsonify({"error": "无效的数据集"}), 400
 
 @app.route('/api/get_dataset')
@@ -268,7 +310,7 @@ def haversine_distance(lng1, lat1, lng2, lat2):
 def get_grid_demand_prediction(grid_id):
     """获取指定网格的需求预测值"""
     try:
-        json_path = os.path.join(CURRENT_DIR, 'real-time results', 'experiment_report.json')
+        json_path = FRONTEND_DATASETS['short']["data_file"]
         if os.path.exists(json_path):
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)

@@ -1,5 +1,3 @@
 data/
 results/*.pt
 .idea/
-__pycache__/
-*.pyc
