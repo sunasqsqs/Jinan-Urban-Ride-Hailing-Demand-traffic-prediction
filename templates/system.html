@@ -384,7 +384,8 @@
     document.addEventListener("DOMContentLoaded", () => {
         if (window.location.protocol === 'blob:' || window.location.protocol === 'file:' || window.location.protocol === 'data:') return;
 
-        const currentDataset = localStorage.getItem('mamba_dataset') || 'results';
+        const storedDataset = localStorage.getItem('mamba_dataset') || 'short';
+        const currentDataset = ({results: 'short', results2: 'long'})[storedDataset] || storedDataset;
 
         fetch(`/api/data?dataset=${currentDataset}`)
             .then(res => res.json())

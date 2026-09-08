@@ -130,7 +130,7 @@
     // ==========================================
     // 统一 JSON 数据 (含真实评估结果)
     // ==========================================
-    const SHARED_JSON_DATA = {
+    let SHARED_JSON_DATA = {
         "evaluation_groups": {
             "Ablation_Study": {
                 "Mamba-GNN": { "mse": "186.47±0.87", "rmse": "13.66±0.03", "mae": "1.84±0.00", "mape": "24.38±0.03", "wmape": "10.93±0.01", "r2": "0.9907±0.0000" },
@@ -160,16 +160,21 @@
     const parseMetric = (val) => typeof val === 'string' ? parseFloat(val.split('±')[0]) : val;
 
     // 组合提取所有模型的静态指标
-    const MODEL_METRICS = {
-        'Mamba-GNN': SHARED_JSON_DATA.evaluation_groups.Fusion_Comparison['Mamba-GNN'],
-        'Transformer-GNN': SHARED_JSON_DATA.evaluation_groups.Fusion_Comparison['Transformer-GNN'],
-        'LSTM-GNN': SHARED_JSON_DATA.evaluation_groups.Fusion_Comparison['LSTM-GNN'],
-        'GRU-GNN': SHARED_JSON_DATA.evaluation_groups.Fusion_Comparison['GRU-GNN'],
-        'Mamba-Only': SHARED_JSON_DATA.evaluation_groups.Single_Comparison['Mamba-Only'],
-        'Transformer-Only': SHARED_JSON_DATA.evaluation_groups.Single_Comparison['Transformer-Only'],
-        'LSTM-Only': SHARED_JSON_DATA.evaluation_groups.Single_Comparison['LSTM-Only'],
-        'GRU-Only': SHARED_JSON_DATA.evaluation_groups.Single_Comparison['GRU-Only']
-    };
+    let MODEL_METRICS = {};
+
+    function hydrateModelMetrics() {
+        const groups = SHARED_JSON_DATA.evaluation_groups;
+        MODEL_METRICS = {
+            'Mamba-GNN': groups.Fusion_Comparison['Mamba-GNN'],
+            'Transformer-GNN': groups.Fusion_Comparison['Transformer-GNN'],
+            'LSTM-GNN': groups.Fusion_Comparison['LSTM-GNN'],
+            'GRU-GNN': groups.Fusion_Comparison['GRU-GNN'],
+            'Mamba-Only': groups.Single_Comparison['Mamba-Only'],
+            'Transformer-Only': groups.Single_Comparison['Transformer-Only'],
+            'LSTM-Only': groups.Single_Comparison['LSTM-Only'],
+            'GRU-Only': groups.Single_Comparison['GRU-Only']
+        };
+    }
 
     const TARGET_MODELS = ['Mamba-GNN', 'Transformer-GNN', 'LSTM-GNN', 'GRU-GNN', 'Mamba-Only', 'Transformer-Only', 'LSTM-Only', 'GRU-Only'];
     const COLORS = {
@@ -185,7 +190,7 @@
 
     // 静态构造时间序列与图表实例
     let staticCharts = { trend: null, bar: null, radar: null };
-    let trajectories = { 'Ground Truth': SHARED_JSON_DATA.predictions_time_series.ground_truth };
+    let trajectories = {};
 
     function generateStaticTrajectories() {
         const gt = SHARED_JSON_DATA.predictions_time_series.ground_truth;
@@ -367,8 +372,17 @@
     }
 
     // 初始化运行
-    window.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', async () => {
         lucide.createIcons();
+        try {
+            const response = await fetch('/api/data?dataset=long');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            SHARED_JSON_DATA = await response.json();
+        } catch (error) {
+            console.error('长周期对比数据加载失败，使用离线兜底:', error);
+        }
+        hydrateModelMetrics();
+        trajectories = {'Ground Truth': SHARED_JSON_DATA.predictions_time_series.ground_truth};
         generateStaticTrajectories();
         initStaticCharts();
         renderStaticTable();

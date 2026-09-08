@@ -70,8 +70,8 @@
             </div>
             <div class="h-6 w-px bg-gray-200"></div>
             <select id="board-dataset-switcher" class="bg-gray-50 border border-gray-300 text-blue-600 text-sm font-bold rounded-xl focus:ring-blue-500 focus:border-blue-500 block px-4 py-2 cursor-pointer outline-none hover:bg-gray-100 transition-colors">
-                <option value="results2" selected>长周期预测 / Long-Term</option>
-                <option value="results">短周期预测 / Short-Term</option>
+                <option value="long" selected>长周期预测 / Long-Term</option>
+                <option value="short">短周期预测 / Short-Term</option>
             </select>
         </div>
     </div>
@@ -289,7 +289,7 @@
 
     // 更新所有静态图谱
     function updateGalleryImages(datasetStr) {
-        const basePath = `/${datasetStr}`;
+        const basePath = `/api/artifacts/${datasetStr}`;
         setImgSrc('img-demand', basePath, 'Fusion_Comparison_total_demand_comparison');
         setImgSrc('img-fit', basePath, 'Fusion_Comparison_goodness_of_fit');
         setImgSrc('img-dist', basePath, 'Fusion_Comparison_error_distribution');
@@ -487,8 +487,7 @@
 
     async function loadDashboardData(datasetStr) {
         try {
-            // 直接通过静态路径拉取，规避全局的 session
-            const jsonPath = `/${datasetStr}/experiment_report.json`;
+            const jsonPath = `/api/data?dataset=${encodeURIComponent(datasetStr)}`;
             const res = await fetch(jsonPath);
             if(!res.ok) throw new Error("Fetch failed");
             const data = await res.json();
@@ -523,8 +522,8 @@
         const metricsSelector = document.getElementById('metrics-model-selector');
         if(metricsSelector) {
             metricsSelector.addEventListener('change', function(e) {
-                const curDataset = dsSelector ? dsSelector.value : 'results2';
-                setImgSrc('img-metrics', `/${curDataset}`, `${e.target.value}_all_metrics_curves`);
+                const curDataset = dsSelector ? dsSelector.value : 'long';
+                setImgSrc('img-metrics', `/api/artifacts/${curDataset}`, `${e.target.value}_all_metrics_curves`);
             });
         }
     });

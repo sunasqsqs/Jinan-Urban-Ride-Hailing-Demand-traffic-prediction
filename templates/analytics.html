@@ -467,10 +467,18 @@
         initLiveMeltdownChart();
     }
 
-    // 智能数据拉取：优先从 JSON 加载，失败则使用硬编码兜底
+    // 长周期熔断实验始终读取统一的前端数据接口。
     async function loadData() {
-        let finalData = EMBEDDED_EXPERIMENT_DATA;
-        addTerminalLog('使用内嵌 Mamba-GNN 评估数据', 'info');
+        let finalData;
+        try {
+            const response = await fetch('/api/data?dataset=long');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            finalData = await response.json();
+            addTerminalLog('已加载长周期 Mamba-GNN 实验与模拟数据', 'info');
+        } catch (error) {
+            finalData = EMBEDDED_EXPERIMENT_DATA;
+            addTerminalLog(`长周期数据加载失败，启用离线兜底：${error.message}`, 'error');
+        }
 
         let ablationNodes = finalData.evaluation_groups.Ablation_Study;
 
