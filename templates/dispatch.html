@@ -3,6 +3,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="{{ url_for('static', filename='click-geolocation.js') }}"></script>
 
 <style>
     ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -264,23 +265,22 @@
         var btn = document.getElementById('dispatch-gps-btn');
         btn.disabled = true;
         btn.innerHTML = '<span class="animate-spin inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full"></span> 定位中';
-        navigator.geolocation.getCurrentPosition(
-            function(pos) {
-                map.setView([pos.coords.latitude, pos.coords.longitude], 14);
+        ClickGeolocation.getAccuratePosition({ targetAccuracy: 50, maxWait: 12000 })
+            .then(function(pos) {
+                map.setView([pos.lat, pos.lng], 14);
                 btn.innerHTML = '<i data-lucide="crosshair" class="w-3.5 h-3.5"></i> 我的位置';
                 btn.className = 'flex items-center gap-1.5 bg-emerald-600 text-white px-3 py-1.5 rounded-lg transition shadow-sm';
                 btn.disabled = false;
                 if (window.lucide) lucide.createIcons();
-            },
-            function(err) {
+                if (pos.accuracy > 3000) alert('当前设备仅返回低精度网络位置，请开启系统“精确位置”权限，或点击地图手动校正。');
+            })
+            .catch(function(err) {
                 alert('定位失败，请检查GPS权限');
                 btn.innerHTML = '<i data-lucide="crosshair" class="w-3.5 h-3.5"></i> 我的位置';
                 btn.className = 'flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg transition shadow-sm';
                 btn.disabled = false;
                 if (window.lucide) lucide.createIcons();
-            },
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-        );
+            });
     }
 
     function drawAllGrids() {
